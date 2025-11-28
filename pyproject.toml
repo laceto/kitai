@@ -1,0 +1,19 @@
+[project]
+name = "kitai"
+version = "0.1.0"
+description = ""
+authors = [{ name = "Luigi", email = "luigi@example.com" }]
+readme = "README.md"
+requires-python = ">=3.9"
+
+packages = [
+    { include = "kitai"}
+]
+
+dependencies = [
+    "pandas>=1.5"
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
