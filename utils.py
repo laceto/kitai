@@ -1,8 +1,10 @@
-import os  
+import os
 import polars as pl
 import pandas as pd
-from dotenv import load_dotenv, find_dotenv   
+from dotenv import load_dotenv, find_dotenv
 from langchain_core.documents import Document
+from langchain_community.document_loaders import TextLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 def df_to_excel(
     df: pd.DataFrame, 
@@ -436,8 +438,110 @@ def df_to_docs(
                 metadata=metadata  
             )  
             documents.append(doc)  
-    except Exception as e:  
+    except Exception as e:
         print("An error occurred:")
-        raise e  
-      
-    return documents  
+        raise e
+
+    return documents
+
+
+def load_text_file(path: str) -> list[Document]:
+    """Load a plain-text file into a list of Documents.
+
+    Uses automatic encoding detection (UTF-8, Latin-1, etc.) so no manual
+    configuration is required.  Returns one Document per file — callers
+    typically pass the result to :func:`chunk_documents` next.
+
+    Args:
+        path (str): Path to the text file.
+
+    Returns:
+        list[Document]: Raw documents with ``metadata["source"]`` set to
+        ``path``.  ``page_content`` is the raw file text, unsplit and
+        uncleaned.
+
+    Raises:
+        FileNotFoundError: If ``path`` does not exist.
+        ValueError: If the file encoding cannot be determined.
+    """
+    loader = TextLoader(path, autodetect_encoding=True)
+    return loader.load()
+
+
+def chunk_documents(
+    docs: list[Document],
+    chunk_size: int = 500,
+    chunk_overlap: int = 100,
+) -> list[Document]:
+    """Split a list of Documents into smaller overlapping chunks.
+
+    Uses ``RecursiveCharacterTextSplitter``, which tries to break on
+    paragraph boundaries, then sentences, then words, before falling back
+    to hard character cuts.  Existing metadata is preserved on every chunk.
+
+    Args:
+        docs (list[Document]): Documents to split.  Typically the output of
+            :func:`load_text_file`.
+        chunk_size (int): Maximum character length per chunk.  Defaults to 500.
+        chunk_overlap (int): Characters shared between consecutive chunks to
+            preserve cross-boundary context.  Must be less than
+            ``chunk_size``.  Defaults to 100.
+
+    Returns:
+        list[Document]: Chunked documents.  ``page_content`` is the raw
+        chunk text; metadata inherits from the source document.
+
+    Raises:
+        ValueError: If ``docs`` is empty or ``chunk_overlap >= chunk_size``.
+    """
+    if not docs:
+        raise ValueError("docs must be a non-empty list.")
+    if chunk_overlap >= chunk_size:
+        raise ValueError(
+            f"chunk_overlap ({chunk_overlap}) must be less than "
+            f"chunk_size ({chunk_size})."
+        )
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+    )
+    return splitter.split_documents(docs)
+
+
+def normalise_whitespace(docs: list[Document]) -> list[Document]:
+    """Replace newlines and tabs with spaces in every Document's content.
+
+    Mutates ``page_content`` in place and returns the same list so the
+    function can be used inline in a pipeline.  Useful before embedding
+    models that treat newlines as sentence boundaries.
+
+    Args:
+        docs (list[Document]): Documents to clean.
+
+    Returns:
+        list[Document]: The same list with normalised ``page_content``.
+    """
+    for doc in docs:
+        doc.page_content = doc.page_content.replace("\n", " ").replace("\t", " ").strip()
+    return docs
+
+
+def assign_sequential_ids(
+    docs: list[Document],
+    start: int = 1,
+) -> list[Document]:
+    """Set ``metadata["id"]`` to a sequential integer on every Document.
+
+    Overwrites any existing ``metadata["id"]`` value.  The counter starts
+    at ``start`` (default 1) and increments by 1 per document.
+
+    Args:
+        docs (list[Document]): Documents to label.
+        start (int): First ID value.  Defaults to 1.
+
+    Returns:
+        list[Document]: The same list with ``metadata["id"]`` set.
+    """
+    for i, doc in enumerate(docs, start=start):
+        doc.metadata = {**(doc.metadata or {}), "id": i}
+    return docs

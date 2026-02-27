@@ -7,7 +7,6 @@ from openai import OpenAI
 import json
 from typing import List, Tuple
 import ast
-# from typing import Optional
 import numpy as np
 import pandas as pd
 
@@ -15,7 +14,43 @@ from langchain_community.docstore.in_memory import InMemoryDocstore
 from langchain_community.vectorstores import FAISS
 import faiss
 
-def create_vectorstore(docs, embeddings, fake_embeddings_model):
+logger = logging.getLogger(__name__)
+
+def create_vectorstore(
+    docs: list[Document],
+    embeddings: np.ndarray,
+    fake_embeddings_model,
+) -> FAISS:
+    """
+    Build a FAISS vector store from pre-computed embeddings and documents.
+
+    Invariants:
+        - ``len(docs)`` must equal ``embeddings.shape[0]``.  A mismatch means
+          the i-th embedding would be paired with the wrong document.
+        - Every document must have ``doc.metadata["id"]`` set; it is used as the
+          key in the in-memory docstore and in ``index_to_docstore_id``.
+
+    Args:
+        docs (list[Document]): Documents to store.  Must be the same length as
+            ``embeddings`` and each must carry a ``metadata["id"]`` field.
+        embeddings (np.ndarray): 2-D float array of shape (n_docs, embedding_dim)
+            with pre-computed embeddings in the same order as ``docs``.
+        fake_embeddings_model: A LangChain embeddings object passed to FAISS as
+            ``embedding_function``.  It is not called at construction time because
+            the embeddings are pre-computed; it is only stored for future
+            similarity-search calls that require re-encoding a query.
+
+    Returns:
+        FAISS: Populated FAISS vector store ready for similarity search.
+
+    Raises:
+        ValueError: If ``len(docs) != embeddings.shape[0]``.
+    """
+    if len(docs) != embeddings.shape[0]:
+        raise ValueError(
+            f"docs and embeddings must have the same length. "
+            f"Got {len(docs)} docs and {embeddings.shape[0]} embedding rows."
+        )
 
     # # Create a FAISS index for the embedding dimension
     embedding_dim = get_embedding_dim(embeddings)
@@ -40,14 +75,6 @@ def create_vectorstore(docs, embeddings, fake_embeddings_model):
     return vector_store
 
 
-# Configure logging once at application entry point
-logging.basicConfig(
-    level=logging.INFO,  # switch to DEBUG for more detail
-    format="%(asctime)s [%(levelname)s] %(message)s"
-)
-
-import numpy as np
-
 def get_embedding_dim(embeddings: np.ndarray) -> int:
     """
     Extract embedding dimension from a numpy array.
@@ -69,23 +96,21 @@ def get_embedding_dim(embeddings: np.ndarray) -> int:
 def load_embeddings_from_csv(
     path_to_csv: str = './book_embeddings.csv',
     embedding_column: str = 'embedding',
-    use_fake_embeddings: bool = False
 ) -> np.ndarray:
     """
-    Load embeddings from CSV or generate fake embeddings for testing.
-    
+    Load embeddings from a CSV file.
+
     Args:
-        path_to_csv: Path to CSV file containing embeddings
-        embedding_column: Column name with embedding data
-        use_fake_embeddings: If True, return FakeEmbeddings for development
-        
+        path_to_csv: Path to CSV file containing embeddings.
+        embedding_column: Column name with embedding data.
+
     Returns:
-        np.ndarray: Stacked embeddings array
-        
+        np.ndarray: Stacked embeddings array of shape (n_rows, embedding_dim).
+
     Raises:
-        FileNotFoundError: If CSV file doesn't exist
-        KeyError: If embedding_column not in CSV
-        ValueError: If embedding format is invalid
+        FileNotFoundError: If CSV file doesn't exist.
+        KeyError: If embedding_column not in CSV.
+        ValueError: If embedding format is invalid.
     """
     try:
         # Load CSV with explicit error handling
@@ -136,22 +161,26 @@ def retrieve_embeddings_batches(client: OpenAI, job_ids: List[str]) -> List[Tupl
         List[Tuple[str, List[float]]]: A list of tuples (custom_id, embedding).
     """
     output_files_ids = []
+    failed_jobs = []
     for job_id in job_ids:
         try:
             batch_info = client.batches.retrieve(job_id)
             output_files_ids.append(batch_info.output_file_id)
         except Exception as e:
-            print(f"Error retrieving batch job {job_id}: {e}")
+            logger.error("Error retrieving batch job %s: %s", job_id, e)
+            failed_jobs.append(job_id)
 
     output_files = []
+    failed_files = []
     for output_file_id in output_files_ids:
         try:
             file_content = client.files.content(output_file_id).text
             output_files.append(file_content)
             lines = file_content.split('\n')
-            print(f"File {output_file_id} contains {len(lines)} lines.")
+            logger.debug("File %s contains %d lines.", output_file_id, len(lines))
         except Exception as e:
-            print(f"Error retrieving file content for {output_file_id}: {e}")
+            logger.error("Error retrieving file content for %s: %s", output_file_id, e)
+            failed_files.append(output_file_id)
 
     embedding_results = []
     for file_content in output_files:
@@ -162,8 +191,14 @@ def retrieve_embeddings_batches(client: OpenAI, job_ids: List[str]) -> List[Tupl
                 embedding = data['response']['body']['data'][0]['embedding']
                 embedding_results.append((custom_id, embedding))
             except Exception as e:
-                print(f"Error parsing line: {e}")
+                logger.error("Error parsing line: %s", e)
 
+    logger.info(
+        "Retrieved %d embeddings. Failed jobs: %d, failed files: %d",
+        len(embedding_results),
+        len(failed_jobs),
+        len(failed_files),
+    )
     return embedding_results
 
 def create_batch_files_embeddings(
@@ -194,14 +229,14 @@ def create_batch_files_embeddings(
     output_path.mkdir(parents=True, exist_ok=True)
 
     num_files = (len(docs) + batch_size - 1) // batch_size
-    logging.info("Creating %d batch files in '%s'", num_files, output_path)
+    logger.info("Creating %d batch files in '%s'", num_files, output_path)
 
     for num_file in range(num_files):
         batch_docs = docs[num_file * batch_size : (num_file + 1) * batch_size]
         output_file = output_path / f"{batch_file_name}_part{num_file}.jsonl"
 
         if output_file.exists():
-            logging.debug("Removing existing file: %s", output_file)
+            logger.debug("Removing existing file: %s", output_file)
             output_file.unlink()
 
         try:
@@ -219,29 +254,37 @@ def create_batch_files_embeddings(
                         },
                     }
                     file.write(json.dumps(payload) + "\n")
-            logging.info("Batch file created: %s", output_file)
+            logger.info("Batch file created: %s", output_file)
         except Exception as e:
-            logging.error("Failed to write batch file '%s': %s", output_file, e)
+            logger.error("Failed to write batch file '%s': %s", output_file, e)
             raise
 
 
 def create_BM25retriever_from_docs(
-    docs: list[Document], 
-    k : int
-    ):  
+    docs: list[Document],
+    k: int,
+) -> BM25Retriever:
+    """
+    Create a BM25 retriever from a list of documents.
 
-    try:  
-        if not docs:  
-            raise ValueError("The documents list cannot be empty.")  
-        if k <= 0:  
-            raise ValueError("k must be a positive integer.")  
-  
-        bm25_retriever = BM25Retriever.from_documents(docs)  
-        bm25_retriever.k = k  
-        return bm25_retriever  
-    except Exception as e:  
-        print(f"An error occurred while creating the BM25 retriever: {e}")  
-        return None
+    Args:
+        docs (list[Document]): Non-empty list of LangChain Document objects.
+        k (int): Number of top documents to return per query.
+
+    Returns:
+        BM25Retriever: Configured BM25 retriever.
+
+    Raises:
+        ValueError: If docs is empty or k is not a positive integer.
+    """
+    if not docs:
+        raise ValueError("docs must be a non-empty list.")
+    if k <= 0:
+        raise ValueError(f"k must be a positive integer, got {k}.")
+
+    bm25_retriever = BM25Retriever.from_documents(docs)
+    bm25_retriever.k = k
+    return bm25_retriever
     
 
 
@@ -263,6 +306,7 @@ def create_embeddings_batches(client: OpenAI, batch_folder: str, completion_wind
         raise ValueError(f"Invalid folder path: {batch_folder}")
 
     batch_input_files = []
+    failed_uploads = []
     job_creations = []
 
     # Create batch files
@@ -274,7 +318,8 @@ def create_embeddings_batches(client: OpenAI, batch_folder: str, completion_wind
                     batch_file = client.files.create(file=f, purpose="batch")
                     batch_input_files.append(batch_file)
             except Exception as e:
-                print(f"Error creating batch file for {file_name}: {e}")
+                logger.error("Error creating batch file for %s: %s", file_name, e)
+                failed_uploads.append(file_name)
 
     # Create batch jobs
     batch_file_ids = [batch_file.id for batch_file in batch_input_files]
@@ -287,12 +332,15 @@ def create_embeddings_batches(client: OpenAI, batch_folder: str, completion_wind
                 metadata={"description": f"part_{i}_icd_embeddings"}
             )
             job_creations.append(job)
+            logger.debug("Batch job created: %s", job)
         except Exception as e:
-            print(f"Error creating batch job for file ID {file_id}: {e}")
+            logger.error("Error creating batch job for file ID %s: %s", file_id, e)
 
-    # WE can see here the jobs created, they start with validation
-    for job in job_creations:
-        print(job)
+    logger.info(
+        "Submitted %d batch jobs. %d files failed upload.",
+        len(job_creations),
+        len(failed_uploads),
+    )
 
     # we extract the ids for the job to check the status
     job_ids = [job.id for job in job_creations]
