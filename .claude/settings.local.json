@@ -8,7 +8,10 @@
       "Bash(Rscript -e \"devtools::test\\(filter = ''registry|projection_factory''\\)\")",
       "Bash(tar:*)",
       "Bash(dir C:\\\\Users\\\\l_ace\\\\Desktop\\\\projects\\\\rss_feed:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ]
   },
   "outputStyle": "Cognitive Debt–Aware Engineering"
