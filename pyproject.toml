@@ -1,16 +1,30 @@
 [project]
 name = "kitai"
 version = "0.1.0"
-description = ""
+description = "RAG toolkit: vector index, BM25, hybrid retrieval, query translation, and OpenAI Batch API helpers."
 authors = [{ name = "Luigi", email = "luigi@example.com" }]
 readme = "README.md"
 requires-python = ">=3.9"
+
 dependencies = [
-    "pandas>=1.5"
+    "pandas>=1.5",
+    "numpy>=1.23",
+    "openai>=1.0",
+    "pydantic>=2.0",
+    "langchain-core>=0.1",
+    "langchain-community>=0.0.20",
+    # NOTE: this project imports from 'langchain_classic', which in the dev
+    # venv is the classic LangChain framework installed under that alias to
+    # avoid collision with the Anthropic Agent SDK (also named 'langchain').
+    # Declare the upstream package here; rename to 'langchain_classic' in your
+    # venv if you also need the Anthropic Agent SDK installed alongside it.
+    "langchain>=0.1",
+    "faiss-cpu>=1.7",
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["kitai*"]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

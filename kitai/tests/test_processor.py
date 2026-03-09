@@ -1,6 +1,7 @@
 import pytest
 from pathlib import Path
-from mymodule import check_and_create_folder
+from kitai.paths import check_and_create_folder
+from kitai.index import create_batch_files_embeddings as create_batch_files
 
 def test_create_new_folder(tmp_path):
     folder = tmp_path / "new_folder"
