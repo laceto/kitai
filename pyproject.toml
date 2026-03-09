@@ -13,12 +13,11 @@ dependencies = [
     "pydantic>=2.0",
     "langchain-core>=0.1",
     "langchain-community>=0.0.20",
-    # NOTE: this project imports from 'langchain_classic', which in the dev
-    # venv is the classic LangChain framework installed under that alias to
-    # avoid collision with the Anthropic Agent SDK (also named 'langchain').
-    # Declare the upstream package here; rename to 'langchain_classic' in your
-    # venv if you also need the Anthropic Agent SDK installed alongside it.
-    "langchain>=0.1",
+    # Classic LangChain (retrievers, self-query, ensemble).
+    # In this repo's dev venv this is installed as 'langchain_classic' to avoid
+    # collision with the Anthropic Agent SDK.  kitai/_langchain_compat.py
+    # tries 'langchain_classic' first then falls back to 'langchain' automatically.
+    "langchain>=0.1,<1.0",
     "faiss-cpu>=1.7",
 ]
 
