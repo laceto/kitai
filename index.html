@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Pikachu: Thunder Charge!</title>
+<style>
+body {
+    background: radial-gradient(circle, #2c3e50, #000000);
+    color: white;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    margin: 0;
+    padding: 20px;
+    min-height: 100vh;
+    overflow: hidden;
+}
+canvas {
+    border: 5px solid #ffd700;
+    background: #000;
+    box-shadow: 0 0 30px rgba(255, 215, 0, 0.5);
+    border-radius: 8px;
+}
+h1 {
+    margin: 5px 0;
+    color: #ffeb3b;
+    text-shadow: 2px 2px #c62828;
+}
+#gameInfo {
+    display: flex;
+    gap: 40px;
+    margin-bottom: 10px;
+    font-weight: bold;
+}
+.stat-box {
+    padding: 5px 15px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    border: 1px solid #ffd700;
+}
+</style>
+</head>
+<body>
+
+<h1>⚡ Pikachu: Thunder Charge! ⚡</h1>
+<div id="gameInfo">
+    <div id="score" class="stat-box">Score: 0</div>
+    <div id="lives" class="stat-box">Lives: ❤️❤️❤️</div>
+</div>
+<canvas id="gameCanvas" width="420" height="420"></canvas>
+<p>Eat the 💎 <b>Thunder Stones</b> to hunt the Wild Pokémon!</p>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+const scoreEl = document.getElementById("score");
+const livesEl = document.getElementById("lives");
+
+const TILE = 21;
+const GRID = 20;
+let score = 0;
+let lives = 3;
+let level = 1;
+let dots = [];
+let powerUps = [];
+let ghosts = [];
+let powerEndTime = 0;
+
+const pikachu = {
+    x: TILE * 10,
+    y: TILE * 10,
+    dir: "right",
+    nextDir: "right",
+    speed: 2,
+    mouth: 0.2,
+    opening: true
+};
+
+function initGame() {
+    dots = [];
+    powerUps = [];
+    for (let i = 1; i < GRID; i++) {
+        for (let j = 1; j < GRID; j++) {
+            if (Math.abs(i-10) < 2 && Math.abs(j-10) < 2) continue;
+            if ((i==1 || i==GRID-1) && (j==1 || j==GRID-1)) {
+                powerUps.push({x: i*TILE, y: j*TILE});
+            } else {
+                dots.push({x: i*TILE, y: j*TILE});
+            }
+        }
+    }
+    spawnGhosts();
+    updateUI();
+}
+
+function spawnGhosts() {
+    const speed = 1.2 + level * 0.2;
+    ghosts = [
+        {x:TILE, y:TILE, vx:speed, vy:0, color:"#9370db", scared:false, startX:TILE, startY:TILE},
+        {x:TILE*(GRID-2), y:TILE, vx:-speed, vy:0, color:"#ff8c00", scared:false, startX:TILE*(GRID-2), startY:TILE},
+        {x:TILE*10, y:TILE*(GRID-2), vx:0, vy:-speed, color:"#40e0d0", scared:false, startX:TILE*10, startY:TILE*(GRID-2)}
+    ];
+}
+
+window.addEventListener("keydown", e => {
+    if (e.key.includes("Arrow")) {
+        e.preventDefault();
+        pikachu.nextDir = e.key.replace("Arrow","").toLowerCase();
+    }
+});
+
+function updateUI(){
+    scoreEl.textContent = `Score: ${score}`;
+    livesEl.innerHTML = `Lives: ${'❤️'.repeat(lives)}`;
+}
+
+function update(){
+    const aligned = pikachu.x % TILE < 2 && pikachu.y % TILE < 2;
+    if(aligned) pikachu.dir = pikachu.nextDir;
+
+    const speed = performance.now() < powerEndTime ? 3 : 2;
+
+    if(pikachu.dir==="left") pikachu.x -= speed;
+    if(pikachu.dir==="right") pikachu.x += speed;
+    if(pikachu.dir==="up") pikachu.y -= speed;
+    if(pikachu.dir==="down") pikachu.y += speed;
+
+    pikachu.x = Math.max(10, Math.min(canvas.width-10, pikachu.x));
+    pikachu.y = Math.max(10, Math.min(canvas.height-10, pikachu.y));
+
+    dots = dots.filter(d=>{
+        if(Math.hypot(pikachu.x-d.x,pikachu.y-d.y)<12){
+            score+=10; return false;
+        }
+        return true;
+    });
+
+    powerUps = powerUps.filter(p=>{
+        if(Math.hypot(pikachu.x-p.x,pikachu.y-p.y)<15){
+            powerEndTime = performance.now()+5000;
+            score+=50;
+            return false;
+        }
+        return true;
+    });
+
+    ghosts.forEach(g=>{
+        const dx = pikachu.x - g.x;
+        const dy = pikachu.y - g.y;
+        const dist = Math.hypot(dx,dy);
+
+        g.scared = performance.now() < powerEndTime;
+
+        if(!g.scared && dist>0){
+            g.vx = (dx/dist)*(1.2+level*0.2);
+            g.vy = (dy/dist)*(1.2+level*0.2);
+        }
+
+        g.x += g.vx;
+        g.y += g.vy;
+
+        if(Math.hypot(pikachu.x-g.x,pikachu.y-g.y)<20){
+            if(g.scared){
+                score+=200;
+                g.x=g.startX; g.y=g.startY;
+            }else{
+                lives--;
+                if(lives<=0){
+                    alert("Pikachu fainted! ⚡");
+                    reset();
+                }else{
+                    pikachu.x=TILE*10;
+                    pikachu.y=TILE*10;
+                }
+            }
+        }
+    });
+
+    if(dots.length===0 && powerUps.length===0){
+        level++;
+        alert("Level Up! ⚡");
+        initGame();
+    }
+
+    pikachu.mouth += pikachu.opening?0.08:-0.08;
+    if(pikachu.mouth>0.25||pikachu.mouth<0.05) pikachu.opening=!pikachu.opening;
+
+    updateUI();
+}
+
+function reset(){
+    score=0;
+    lives=3;
+    level=1;
+    powerEndTime=0;
+    pikachu.x=TILE*10;
+    pikachu.y=TILE*10;
+    initGame();
+}
+
+function draw(){
+    ctx.fillStyle="black";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    dots.forEach(d=>{
+        ctx.fillStyle="white";
+        ctx.beginPath();
+        ctx.arc(d.x,d.y,3,0,Math.PI*2);
+        ctx.fill();
+    });
+
+    powerUps.forEach(p=>{
+        ctx.fillStyle="#00ffff";
+        ctx.shadowBlur=15;
+        ctx.shadowColor="#00ffff";
+        ctx.beginPath();
+        ctx.arc(p.x,p.y,6,0,Math.PI*2);
+        ctx.fill();
+        ctx.shadowBlur=0;
+    });
+
+    ctx.save();
+    ctx.translate(pikachu.x,pikachu.y);
+    ctx.rotate({right:0,down:0.5,left:1,up:1.5}[pikachu.dir]*Math.PI);
+    ctx.fillStyle=performance.now()<powerEndTime?
+        (Math.floor(performance.now()/100)%2?"#ff5722":"#ffeb3b")
+        :"#ffeb3b";
+    ctx.beginPath();
+    ctx.moveTo(0,0);
+    ctx.arc(0,0,12,pikachu.mouth*Math.PI,(2-pikachu.mouth)*Math.PI);
+    ctx.fill();
+    ctx.restore();
+
+    ghosts.forEach(g=>{
+        ctx.fillStyle=g.scared?"#1a237e":g.color;
+        ctx.beginPath();
+        ctx.arc(g.x,g.y-4,11,Math.PI,0);
+        ctx.lineTo(g.x+11,g.y+11);
+        ctx.lineTo(g.x-11,g.y+11);
+        ctx.fill();
+    });
+}
+
+function loop(){
+    update();
+    draw();
+    requestAnimationFrame(loop);
+}
+
+initGame();
+loop();
+</script>
+</body>
+</html>
