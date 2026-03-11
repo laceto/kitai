@@ -15,6 +15,16 @@ kitai/
   batch.py              — OpenAI Batch API primitives + embedding workflow helpers
   export.py             — write DataFrames to CSV / Excel
   paths.py              — folder creation and file-path listing utilities
+
+notebooks/
+  index_guide.ipynb             — vector store & BM25 user guide
+  retriever_guide.ipynb         — retrieval strategies user guide
+  query_translation_guide.ipynb — query translation user guide
+  batch_api_guide.ipynb         — OpenAI Batch API user guide
+
+scripts/
+  hybrid_rag.py                 — end-to-end hybrid RAG demo
+  icd_batch_embedding.ipynb     — raw dev notebook (not a guide)
 ```
 
 ## Installation

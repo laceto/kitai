@@ -21,12 +21,16 @@ kitai/
     test_processor.py
 ```
 
-Root-level notebooks (user guides):
-- `index_guide.ipynb`
-- `retriever_guide.ipynb`
-- `query_translation_guide.ipynb`
-- `batch_api_guide.ipynb`
-- `icd_batch_embedding.ipynb`  ← raw dev notebook, not a guide
+User-guide notebooks (in `notebooks/`):
+- `notebooks/index_guide.ipynb`
+- `notebooks/retriever_guide.ipynb`
+- `notebooks/query_translation_guide.ipynb`
+- `notebooks/batch_api_guide.ipynb`
+
+Raw dev / one-off scripts (in `scripts/`):
+- `scripts/icd_batch_embedding.ipynb`  ← raw dev notebook, not a guide
+- `scripts/hybrid_rag.py`              ← end-to-end hybrid RAG demo
+- `scripts/create_batch_files_v2.py`, `retrieve_batch_file_results.py`, etc.
 
 ---
 
