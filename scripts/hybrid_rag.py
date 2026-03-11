@@ -89,7 +89,7 @@ K_SEMANTIC = 6   # docs to retrieve from FAISS
 K_BM25 = 6       # docs to retrieve from BM25
 WEIGHTS_SPARSE = 0.5  # 0.0 = pure semantic, 1.0 = pure BM25
 
-QUERY = "What are the latest news about interest rates and central bank policy?"
+QUERY = "What are the latest news about Iran - USA war?"
 
 # ---------------------------------------------------------------------------
 # Logging
