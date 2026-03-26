@@ -11,15 +11,15 @@ import numpy as np
 import pandas as pd
 
 from langchain_community.docstore.in_memory import InMemoryDocstore
-from langchain_community.vectorstores import FAISS
+from langchain_community.vectorstores import FAISS, Chroma
 import faiss
 
 logger = logging.getLogger(__name__)
 
-def create_vectorstore(
+def create_faiss_vectorstore_from_embeddings(
     docs: list[Document],
     embeddings: np.ndarray,
-    fake_embeddings_model,
+    query_encoder,
 ) -> FAISS:
     """
     Build a FAISS vector store from pre-computed embeddings and documents.
@@ -35,10 +35,9 @@ def create_vectorstore(
             ``embeddings`` and each must carry a ``metadata["id"]`` field.
         embeddings (np.ndarray): 2-D float array of shape (n_docs, embedding_dim)
             with pre-computed embeddings in the same order as ``docs``.
-        fake_embeddings_model: A LangChain embeddings object passed to FAISS as
-            ``embedding_function``.  It is not called at construction time because
-            the embeddings are pre-computed; it is only stored for future
-            similarity-search calls that require re-encoding a query.
+        query_encoder: A LangChain embeddings object stored as FAISS's
+            ``embedding_function``.  Not called during construction (embeddings
+            are pre-computed); only used at query time to re-encode query strings.
 
     Returns:
         FAISS: Populated FAISS vector store ready for similarity search.
@@ -52,27 +51,23 @@ def create_vectorstore(
             f"Got {len(docs)} docs and {embeddings.shape[0]} embedding rows."
         )
 
-    # # Create a FAISS index for the embedding dimension
     embedding_dim = get_embedding_dim(embeddings)
-    # print(embedding_dim)
-    index = faiss.IndexFlatL2(embedding_dim)  # L2 distance index
-
-    # Add embeddings to the index
+    index = faiss.IndexFlatL2(embedding_dim)
     index.add(embeddings)
 
-    # Create an in-memory docstore mapping from internal index to document ID
     index_to_docstore_id = {i: doc.metadata["id"] for i, doc in enumerate(docs)}
-
-    # Create the docstore with documents keyed by their IDs
     docstore = InMemoryDocstore({doc.metadata["id"]: doc for doc in docs})
 
-    vector_store = FAISS(
-        embedding_function=fake_embeddings_model,  # Not used since embeddings are precomputed
+    return FAISS(
+        embedding_function=query_encoder,
         index=index,
         docstore=docstore,
         index_to_docstore_id=index_to_docstore_id,
     )
-    return vector_store
+
+
+# Backward-compat alias — prefer create_faiss_vectorstore_from_embeddings in new code.
+create_vectorstore = create_faiss_vectorstore_from_embeddings
 
 
 def get_embedding_dim(embeddings: np.ndarray) -> int:
@@ -258,6 +253,229 @@ def create_batch_files_embeddings(
         except Exception as e:
             logger.error("Failed to write batch file '%s': %s", output_file, e)
             raise
+
+
+def create_chroma_vectorstore(
+    docs: list[Document],
+    embedding_fn,
+    collection_name: str = "kitai",
+) -> Chroma:
+    """
+    Build an ephemeral (in-memory) Chroma vector store from a list of documents.
+
+    Use this when you need a vector store that supports ``SelfQueryRetriever``
+    structured metadata filtering — FAISS does not support it.
+
+    Invariants:
+        - ``docs`` must be non-empty.
+        - ``collection_name`` must be a non-empty string.
+
+    Args:
+        docs (list[Document]): Documents to index.  Each should carry a
+            ``metadata["id"]`` field if you intend to filter by ID later.
+        embedding_fn: A LangChain ``Embeddings`` instance (e.g. ``OpenAIEmbeddings()``)
+            used to encode both documents and queries.
+        collection_name (str): Chroma collection name.  Defaults to ``"kitai"``.
+
+    Returns:
+        Chroma: Populated in-memory Chroma vector store.
+
+    Raises:
+        ValueError: If ``docs`` is empty or ``collection_name`` is blank.
+    """
+    if not docs:
+        raise ValueError("docs must be a non-empty list.")
+    if not collection_name:
+        raise ValueError("collection_name must be a non-empty string.")
+
+    return Chroma.from_documents(
+        documents=docs,
+        embedding=embedding_fn,
+        collection_name=collection_name,
+    )
+
+
+def create_chroma_vectorstore_from_embeddings(
+    docs: list[Document],
+    embeddings: np.ndarray,
+    query_encoder,
+    collection_name: str = "kitai",
+    persist_directory: str | None = None,
+) -> Chroma:
+    """
+    Build a Chroma vector store from pre-computed embeddings and documents.
+
+    Mirrors the ``create_faiss_vectorstore_from_embeddings`` workflow: callers
+    supply embeddings they have already computed (e.g. via ``kitai.batch``) and
+    get a Chroma store back — no second call to the embedding API.
+
+    In chromadb 1.5+, ``Chroma.from_embeddings`` no longer exists.  This
+    function creates an empty Chroma collection and injects the pre-computed
+    vectors via ``_collection.upsert`` — which accepts ``np.ndarray`` directly
+    and does **not** call ``embedding_function`` during construction.
+    ``query_encoder`` is only stored for query-time re-encoding of search strings.
+
+    Invariants:
+        - ``docs`` must be non-empty.
+        - ``len(docs)`` must equal ``embeddings.shape[0]``.
+        - Every ``doc.metadata["id"]`` must be set and unique across the list.
+        - ``collection_name`` must be non-empty.
+
+    Args:
+        docs (list[Document]): Documents to store, in the same order as
+            ``embeddings``.  Each must carry ``metadata["id"]``.
+        embeddings (np.ndarray): 2-D array of shape ``(n_docs, embedding_dim)``.
+            ``float32`` and ``float64`` are both accepted; internally cast to
+            ``float64`` before passing to Chroma to avoid numpy scalar type
+            errors.
+        query_encoder: A LangChain ``Embeddings`` instance stored for query-time
+            use only (not called during construction).
+        collection_name (str): Chroma collection name.  Defaults to ``"kitai"``.
+        persist_directory (str | None): If given, the collection is written to
+            disk at this path (auto-persisted on chromadb ≥ 0.4).  ``None``
+            creates an ephemeral in-memory store.
+
+    Returns:
+        Chroma: Populated Chroma vector store ready for similarity search and
+            ``SelfQueryRetriever``.
+
+    Raises:
+        ValueError: If ``docs`` is empty, lengths mismatch, ``metadata["id"]``
+            is missing on any document, IDs are not unique, or
+            ``collection_name`` is blank.
+        KeyError: If any document is missing ``metadata["id"]``.
+    """
+    if not docs:
+        raise ValueError("docs must be a non-empty list.")
+    if len(docs) != embeddings.shape[0]:
+        raise ValueError(
+            f"docs and embeddings must have the same length. "
+            f"Got {len(docs)} docs and {embeddings.shape[0]} embedding rows."
+        )
+    if not collection_name:
+        raise ValueError("collection_name must be a non-empty string.")
+
+    # Validate ids — KeyError propagates if metadata["id"] is missing.
+    ids = [str(doc.metadata["id"]) for doc in docs]
+    if len(ids) != len(set(ids)):
+        duplicates = {i for i in ids if ids.count(i) > 1}
+        raise ValueError(
+            f"metadata['id'] values must be unique. duplicate ids: {duplicates}"
+        )
+
+    texts = [doc.page_content for doc in docs]
+    metadatas = [doc.metadata for doc in docs]
+    # chromadb Collection.upsert accepts float32 ndarray directly.
+    emb_array = embeddings.astype(np.float32)
+
+    logger.info(
+        "Building Chroma store from pre-computed embeddings: %d docs, dim=%d, persist=%r",
+        len(docs),
+        embeddings.shape[1],
+        persist_directory,
+    )
+    # Create an empty Chroma collection with query_encoder stored for query-time
+    # use, then inject pre-computed vectors via Collection.upsert — which accepts
+    # np.ndarray directly and does NOT call embedding_function during construction.
+    vs = Chroma(
+        collection_name=collection_name,
+        embedding_function=query_encoder,
+        persist_directory=persist_directory,
+    )
+    vs._collection.upsert(
+        ids=ids,
+        embeddings=emb_array,
+        documents=texts,
+        metadatas=metadatas,
+    )
+    return vs
+
+
+def save_chroma_vectorstore(
+    docs: list[Document],
+    embedding_fn,
+    persist_directory: str,
+    collection_name: str = "kitai",
+) -> Chroma:
+    """
+    Build a Chroma vector store and persist it to disk.
+
+    On chromadb >= 0.4 persistence is automatic once ``persist_directory`` is
+    set — no separate ``.persist()`` call is required.
+
+    Invariants:
+        - ``docs`` must be non-empty.
+        - ``persist_directory`` must be a non-empty string.
+
+    Args:
+        docs (list[Document]): Documents to index.
+        embedding_fn: A LangChain ``Embeddings`` instance.
+        persist_directory (str): Local path where Chroma writes its SQLite
+            database and segment files.
+        collection_name (str): Chroma collection name.  Defaults to ``"kitai"``.
+
+    Returns:
+        Chroma: Populated Chroma vector store backed by ``persist_directory``.
+
+    Raises:
+        ValueError: If ``docs`` is empty or ``persist_directory`` is blank.
+    """
+    if not docs:
+        raise ValueError("docs must be a non-empty list.")
+    if not persist_directory:
+        raise ValueError("persist_directory must be a non-empty string.")
+
+    logger.info(
+        "Saving Chroma vector store with %d docs to '%s'", len(docs), persist_directory
+    )
+    return Chroma.from_documents(
+        documents=docs,
+        embedding=embedding_fn,
+        collection_name=collection_name,
+        persist_directory=persist_directory,
+    )
+
+
+def load_chroma_vectorstore(
+    persist_directory: str,
+    embedding_fn,
+    collection_name: str = "kitai",
+) -> Chroma:
+    """
+    Load a previously persisted Chroma vector store from disk.
+
+    Args:
+        persist_directory (str): Path passed to ``save_chroma_vectorstore``
+            when the store was created.
+        embedding_fn: The same LangChain ``Embeddings`` instance used at
+            save time — must produce vectors of identical dimension.
+        collection_name (str): Must match the name used at save time.
+            Defaults to ``"kitai"``.
+
+    Returns:
+        Chroma: Loaded vector store ready for similarity search and
+            ``SelfQueryRetriever``.
+
+    Raises:
+        ValueError: If ``persist_directory`` is blank.
+        FileNotFoundError: If ``persist_directory`` does not exist on disk.
+    """
+    if not persist_directory:
+        raise ValueError("persist_directory must be a non-empty string.")
+
+    persist_path = Path(persist_directory)
+    if not persist_path.exists():
+        raise FileNotFoundError(
+            f"Chroma persist directory not found: '{persist_directory}'. "
+            "Did you call save_chroma_vectorstore first?"
+        )
+
+    logger.info("Loading Chroma vector store from '%s'", persist_directory)
+    return Chroma(
+        persist_directory=persist_directory,
+        embedding_function=embedding_fn,
+        collection_name=collection_name,
+    )
 
 
 def create_BM25retriever_from_docs(

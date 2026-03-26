@@ -130,13 +130,12 @@ texts = extract_attribute_docs(docs, "page_content")
 
 ### Vector store & BM25 indexing (`kitai.index`)
 
-Build a FAISS vector store from pre-computed embeddings, or a BM25 retriever
-from documents.
+Build a FAISS or Chroma vector store from documents, or a BM25 retriever.
 
 ```python
 import numpy as np
 from kitai.index import (
-    create_vectorstore,
+    create_faiss_vectorstore_from_embeddings,
     load_embeddings_from_csv,
     create_BM25retriever_from_docs,
 )
@@ -147,9 +146,9 @@ embeddings: np.ndarray = load_embeddings_from_csv(
     embedding_column="embedding",
 )
 
-# Build FAISS vector store
+# Build FAISS vector store (pre-computed embeddings required)
 # docs[i].metadata["id"] must be set — used as the docstore key
-vector_store = create_vectorstore(docs, embeddings, fake_embeddings_model)
+vector_store = create_faiss_vectorstore_from_embeddings(docs, embeddings, query_encoder)
 
 # BM25 from Documents (re-exported in kitai.retriever too)
 bm25 = create_BM25retriever_from_docs(docs, k=5)
@@ -157,6 +156,36 @@ bm25 = create_BM25retriever_from_docs(docs, k=5)
 
 > **Invariant:** `len(docs)` must equal `embeddings.shape[0]` and every
 > document must carry `metadata["id"]`.
+> `create_vectorstore` is a deprecated alias for `create_faiss_vectorstore_from_embeddings`.
+
+**Chroma vector store** — required for `SelfQueryRetriever` (FAISS does not
+support structured metadata filtering):
+
+```python
+from langchain_openai import OpenAIEmbeddings
+from kitai.index import (
+    create_chroma_vectorstore,                 # ephemeral, from callable encoder
+    create_chroma_vectorstore_from_embeddings, # ephemeral or persistent, from np.ndarray
+    save_chroma_vectorstore,                   # persistent, from callable encoder
+    load_chroma_vectorstore,                   # load from disk
+)
+
+embedding_fn = OpenAIEmbeddings(model="text-embedding-3-small")
+
+# Callable encoder path — Chroma calls embed_documents at index time
+chroma_vs = create_chroma_vectorstore(docs, embedding_fn)
+
+# Pre-computed embeddings path — same ndarray workflow as FAISS, no re-embedding
+chroma_vs = create_chroma_vectorstore_from_embeddings(
+    docs, embeddings, query_encoder=embedding_fn
+)
+
+# Persist to disk (auto-persisted on chromadb ≥ 0.4)
+chroma_vs = save_chroma_vectorstore(docs, embedding_fn, persist_directory="./chroma_db")
+
+# Reload from a previously saved directory
+chroma_vs = load_chroma_vectorstore("./chroma_db", embedding_fn)
+```
 
 ---
 
@@ -190,7 +219,11 @@ hybrid = create_hybrid_retriever(
 )
 
 # Self-query retriever — LLM generates a metadata filter automatically
+# Requires a Chroma vector store (FAISS does not support structured filters)
 from langchain_classic.chains.query_constructor.schema import AttributeInfo
+from kitai.index import create_chroma_vectorstore
+
+chroma_store = create_chroma_vectorstore(docs, embedding_fn)
 
 metadata_field_info = [
     AttributeInfo(name="year", description="Publication year", type="integer"),
@@ -198,7 +231,7 @@ metadata_field_info = [
 ]
 sq_retriever = create_self_query_retriever(
     model,
-    vector_store,
+    chroma_store,
     document_content_description="Insurance contract clauses",
     metadata_field_info=metadata_field_info,
 )

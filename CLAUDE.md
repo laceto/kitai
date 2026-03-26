@@ -141,7 +141,11 @@ poll ticks from `kitai.batch`.
 ### kitai.index
 | Symbol | Type | Notes |
 |---|---|---|
-| `create_vectorstore(docs, embeddings, fake_embeddings_model)` | function | returns `FAISS` |
+| `create_faiss_vectorstore_from_embeddings(docs, embeddings, query_encoder)` | function | returns `FAISS`; `create_vectorstore` is a deprecated alias |
+| `create_chroma_vectorstore(docs, embedding_fn, collection_name)` | function | returns ephemeral `Chroma` (callable encoder); use for `SelfQueryRetriever` |
+| `create_chroma_vectorstore_from_embeddings(docs, embeddings, query_encoder, collection_name, persist_directory)` | function | returns `Chroma` from pre-computed `np.ndarray`; supports `SelfQueryRetriever` |
+| `save_chroma_vectorstore(docs, embedding_fn, persist_directory, collection_name)` | function | returns persistent `Chroma` (callable encoder); writes to disk |
+| `load_chroma_vectorstore(persist_directory, embedding_fn, collection_name)` | function | loads `Chroma` from disk; raises `FileNotFoundError` if path absent |
 | `get_embedding_dim(embeddings)` | function | `ndarray` → `int` |
 | `load_embeddings_from_csv(path_to_csv, embedding_column)` | function | returns `ndarray` |
 | `create_BM25retriever_from_docs(docs, k)` | function | canonical definition |
@@ -235,7 +239,8 @@ Enable `verbose=True` in `create_self_query_retriever`. The LLM's generated
 structured query (filter + semantic query string) will be logged. Check that:
 1. The filter field names match the `name` field in `AttributeInfo` exactly.
 2. The vector store backend supports structured query filtering (FAISS does
-   not in this version — use Chroma or another supported store).
+   not in this version — use `kitai.index.create_chroma_vectorstore` to build
+   a compatible Chroma store; `chromadb` must be installed).
 
 ### Wrong LangChain import resolves to Anthropic SDK
 If you see `ImportError` or unexpected attributes from `langchain.*`, you have

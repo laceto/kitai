@@ -41,7 +41,7 @@ create_batch_files_embeddings(
     output_dir=batch_files_embeddings_folder
 )
 
-from kitai.index import create_embeddings_batches, load_embeddings_from_csv, get_embedding_dim, create_vectorstore
+from kitai.index import create_embeddings_batches, load_embeddings_from_csv, get_embedding_dim, create_faiss_vectorstore_from_embeddings
 from openai import OpenAI
 from dotenv import load_dotenv 
 load_dotenv()
@@ -63,7 +63,7 @@ load_dotenv()
 # embeddings = load_embeddings_from_csv('./data/batch_files/output/batch_691977fd05888190be2e4634e85ef152.csv')
 # embeddings_size = get_embedding_dim(embeddings)
 # fake_embeddings_model = FakeEmbeddings(size = embeddings_size)
-# vector_store = create_vectorstore(docs, embeddings, fake_embeddings_model)
+# vector_store = create_faiss_vectorstore_from_embeddings(docs, embeddings, fake_embeddings_model)
 # vector_store.save_local(path_vectorstore, index_name='faiss_index_rss_feeds')
 
 # vector_store = FAISS.load_local(path_vectorstore, index_name='faiss_index_rss_feeds', embeddings=fake_embeddings_model, allow_dangerous_deserialization=True)
