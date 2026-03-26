@@ -182,8 +182,8 @@ poll ticks from `kitai.batch`.
 ### kitai.export
 | Symbol | Notes |
 |---|---|
-| `df_to_csv(df, path)` | uses `print()` for status — not logging |
-| `df_to_excel(df, path, sheet)` | uses `print()` for status — not logging |
+| `df_to_csv(df, path)` | logs success at INFO; re-raises on error |
+| `df_to_excel(df, path, sheet)` | logs success at INFO; re-raises on error |
 
 ### kitai.paths
 | Symbol | Notes |
@@ -195,15 +195,17 @@ poll ticks from `kitai.batch`.
 
 ## Known issues / technical debt
 
-| Location | Issue |
-|---|---|
-| `kitai/transform.py:add_num_id_to_metadata` | `return docs` is inside the `for` loop — only the first document gets `id_new` assigned |
-| `kitai/transform.py:list_to_docs` | uses `bare except Exception` + `print()` instead of raising |
-| `kitai/transform.py:flatten_list_of_lists` | uses `bare except Exception` + `print()` instead of raising |
-| `kitai/export.py` | uses `print()` instead of `logger` |
-| `kitai/index.py:retrieve_embeddings_batches` | superseded by `kitai.batch` — kept for backward compat |
-| `kitai/index.py:create_batch_files_embeddings` | disk-based; `kitai.batch.build_embedding_tasks` is the preferred in-memory replacement |
-| `kitai/index.py:create_embeddings_batches` | disk-based; superseded by `kitai.batch.submit_batch_job` |
+No open items — all previously listed issues have been resolved.
+
+| Location | Issue | Status |
+|---|---|---|
+| `kitai/transform.py:add_num_id_to_metadata` | `return docs` inside `for` loop | ✓ fixed |
+| `kitai/transform.py:list_to_docs` | bare except + print() | ✓ fixed |
+| `kitai/transform.py:flatten_list_of_lists` | bare except + print() | ✓ fixed |
+| `kitai/export.py` | print() instead of logger | ✓ fixed |
+| `kitai/index.py:retrieve_embeddings_batches` | superseded by `kitai.batch` | ✓ deprecated (`DeprecationWarning`) |
+| `kitai/index.py:create_batch_files_embeddings` | superseded by `kitai.batch` | ✓ deprecated (`DeprecationWarning`) |
+| `kitai/index.py:create_embeddings_batches` | superseded by `kitai.batch` | ✓ deprecated (`DeprecationWarning`) |
 
 ---
 
