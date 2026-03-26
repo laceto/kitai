@@ -211,7 +211,8 @@ reordered = reorder_docs(retrieved_docs)
 
 ### OpenAI Batch API (`kitai.batch`)
 
-Two independent layers — generic primitives and embedding-specific helpers.
+Three independent layers — generic primitives, embedding-specific helpers,
+and chat-completion helpers.
 
 #### Generic primitives
 
@@ -260,6 +261,40 @@ results = download_batch_results(client, completed_ids[0])
 # 5. Extract (custom_id, embedding) pairs
 pairs = parse_embedding_results(results)
 # pairs[i] == ("custom_id_<doc.metadata['id']>", [0.12, -0.03, ...])
+```
+
+#### Chat completion workflow
+
+```python
+from kitai.batch import (
+    build_chat_tasks,
+    poll_until_complete,
+    parse_chat_results,
+    submit_batch_job,
+    download_batch_results,
+)
+
+# 1. Build tasks — each item needs "id" and "content" keys
+items = [{"id": "1", "content": "Summarise this clause..."}, ...]
+tasks = build_chat_tasks(items, system_prompt="You are a concise summariser.")
+
+# 2. Submit
+job_id = submit_batch_job(
+    client, tasks,
+    endpoint="/v1/chat/completions",
+    metadata={"description": "summarise_run_1"},
+)
+
+# 3. Wait for completion
+completed_ids = poll_until_complete(client, [job_id], poll_interval=10.0)
+
+# 4. Download raw results
+results = download_batch_results(client, completed_ids[0])
+
+# 5. Extract (custom_id, value) pairs — supply any extractor for the response text
+pairs = parse_chat_results(results, extractor_fn=str.strip)
+# or with a JSON extractor:
+# pairs = parse_chat_results(results, extractor_fn=json.loads)
 ```
 
 ---

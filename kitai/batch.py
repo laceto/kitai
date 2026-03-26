@@ -21,6 +21,14 @@ Architecture — two independent layers:
        poll_until_complete()     — block/poll until all jobs reach a terminal state
        parse_embedding_results() — raw result dicts → (custom_id, embedding) pairs
 
+  3. Chat completion workflow helpers
+     Wraps the generic primitives for batched /v1/chat/completions calls.
+     The caller supplies items (each with "id" and "content") and a system
+     prompt; an extractor_fn maps each response string to the desired output.
+
+       build_chat_tasks()        — items + system_prompt → Batch API task dicts
+       parse_chat_results()      — raw result dicts + extractor_fn → (custom_id, T) pairs
+
 Invariants:
   - No module-level side effects: no client initialisation, no load_dotenv().
   - All network failures propagate to callers; per-item errors are logged, not raised.
@@ -37,7 +45,7 @@ import logging
 import os
 import tempfile
 import time
-from typing import List, Tuple
+from typing import Callable, List, Tuple, TypeVar
 
 from langchain_core.documents import Document
 from openai import OpenAI
@@ -437,6 +445,174 @@ def parse_embedding_results(
 
     logger.info(
         "Parsed %d/%d embeddings successfully. Skipped: %d.",
+        len(parsed),
+        len(results),
+        len(results) - len(parsed),
+    )
+    return parsed
+
+
+# ── Chat completion workflow helpers ──────────────────────────────────────────
+#
+# These two functions mirror the embedding helpers for the /v1/chat/completions
+# endpoint.  The caller controls:
+#   - what gets sent   (items: list[dict] with "id" and "content" keys)
+#   - what gets parsed (extractor_fn: str → T, applied to each response string)
+#
+# Pipeline:
+#   items  →  build_chat_tasks()
+#          →  submit_batch_job(..., endpoint="/v1/chat/completions")
+#          →  poll_until_complete()
+#          →  download_batch_results()
+#          →  parse_chat_results(extractor_fn=...)
+#          →  list[(custom_id, T)]
+#
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: Default chat model used by :func:`build_chat_tasks`.
+DEFAULT_CHAT_MODEL: str = "gpt-4o-mini"
+
+_T = TypeVar("_T")
+
+
+def build_chat_tasks(
+    items: list[dict],
+    system_prompt: str,
+    model: str = DEFAULT_CHAT_MODEL,
+) -> list[dict]:
+    """Build OpenAI Batch API task dicts for chat completion over a list of items.
+
+    Each item must have:
+
+    - ``"id"``      — unique identifier; becomes the ``custom_id`` field
+      (``"custom_id_{id}"``) and is used by :func:`parse_chat_results` to
+      match results back to inputs.
+    - ``"content"`` — the user-turn message text.
+
+    The system prompt is shared across all tasks in the batch.
+
+    Args:
+        items (list[dict]): Non-empty list of dicts, each with ``"id"`` and
+            ``"content"`` keys.
+        system_prompt (str): System message applied to every task.
+        model (str): OpenAI chat model name.  Defaults to
+            :data:`DEFAULT_CHAT_MODEL` (``"gpt-4o-mini"``).
+
+    Returns:
+        list[dict]: One Batch API task dict per item, ready to pass to
+        :func:`submit_batch_job` with ``endpoint="/v1/chat/completions"``.
+
+    Raises:
+        ValueError: If ``items`` is empty.
+        KeyError: If any item is missing the ``"id"`` or ``"content"`` key.
+
+    Example::
+
+        tasks = build_chat_tasks(
+            items=[{"id": "1", "content": "Summarise this text..."}],
+            system_prompt="You are a concise summariser.",
+            model="gpt-4o-mini",
+        )
+        job_id = submit_batch_job(client, tasks, endpoint="/v1/chat/completions")
+    """
+    if not items:
+        raise ValueError("items must be a non-empty list.")
+
+    tasks = [
+        {
+            "custom_id": f"custom_id_{item['id']}",
+            "method": "POST",
+            "url": "/v1/chat/completions",
+            "body": {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": item["content"]},
+                ],
+            },
+        }
+        for item in items
+    ]
+    logger.debug(
+        "Built %d chat tasks (model=%s).",
+        len(tasks),
+        model,
+    )
+    return tasks
+
+
+def parse_chat_results(
+    results: list[dict],
+    extractor_fn: Callable[[str], _T],
+) -> List[Tuple[str, _T]]:
+    """Extract (custom_id, value) pairs from raw Batch API chat completion results.
+
+    Applies ``extractor_fn`` to the response text
+    (``choices[0].message.content``) of each successfully completed item.
+    Items with a batch-level ``"error"`` field, an unexpected response
+    structure, or an ``extractor_fn`` exception are logged at ERROR and
+    skipped — the caller receives only successfully parsed pairs.
+
+    Args:
+        results (list[dict]): Output of :func:`download_batch_results` for a
+            ``/v1/chat/completions`` batch job.
+        extractor_fn (Callable[[str], T]): Function that transforms the raw
+            response string into the desired output type.  Raise an exception
+            inside it to signal a parse failure — the item will be skipped.
+
+    Returns:
+        List[Tuple[str, T]]: One ``(custom_id, value)`` pair per successfully
+        parsed item.  ``custom_id`` preserves the original value set in
+        :func:`build_chat_tasks` (e.g. ``"custom_id_42"``).
+
+    Raises:
+        ValueError: If ``results`` is empty.
+
+    Example::
+
+        pairs = parse_chat_results(results, extractor_fn=lambda s: s.strip())
+        # or with a JSON extractor:
+        import json
+        pairs = parse_chat_results(results, extractor_fn=json.loads)
+    """
+    if not results:
+        raise ValueError("results must be a non-empty list.")
+
+    parsed: List[Tuple[str, _T]] = []
+
+    for item in results:
+        custom_id = item.get("custom_id", "<unknown>")
+
+        if item.get("error"):
+            logger.error(
+                "Skipping item custom_id=%s — batch item error: %s",
+                custom_id,
+                item["error"],
+            )
+            continue
+
+        try:
+            text: str = item["response"]["body"]["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            logger.error(
+                "Skipping item custom_id=%s — unexpected response structure: %s",
+                custom_id,
+                exc,
+            )
+            continue
+
+        try:
+            value: _T = extractor_fn(text)
+            parsed.append((custom_id, value))
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "Skipping item custom_id=%s — extractor_fn raised: %s",
+                custom_id,
+                exc,
+            )
+
+    logger.info(
+        "Parsed %d/%d chat results successfully. Skipped: %d.",
         len(parsed),
         len(results),
         len(results) - len(parsed),

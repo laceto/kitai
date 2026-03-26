@@ -171,6 +171,9 @@ poll ticks from `kitai.batch`.
 | `BatchJobNotCompleteError` | exception | `.batch_id`, `.status` attributes |
 | `DEFAULT_EMBEDDING_MODEL` | constant | `"text-embedding-3-small"` |
 | `DEFAULT_EMBEDDING_DIMENSIONS` | constant | `1536` |
+| `build_chat_tasks(items, system_prompt, model)` | function | `items` is `list[dict]` with `"id"` and `"content"` keys; returns `list[dict]` for `/v1/chat/completions` |
+| `parse_chat_results(results, extractor_fn)` | function | applies `extractor_fn: str → T` to each response text; returns `list[tuple[str, T]]`; skips errors |
+| `DEFAULT_CHAT_MODEL` | constant | `"gpt-4o-mini"` |
 
 ### kitai.export
 | Symbol | Notes |
