@@ -3,6 +3,7 @@ from langchain_community.retrievers import BM25Retriever
 import logging
 from pathlib import Path
 import os
+import warnings
 from openai import OpenAI
 import json
 from typing import List, Tuple
@@ -148,6 +149,10 @@ def retrieve_embeddings_batches(client: OpenAI, job_ids: List[str]) -> List[Tupl
     """
     Retrieves embeddings from completed batch jobs.
 
+    .. deprecated::
+        Use :func:`kitai.batch.download_batch_results` and
+        :func:`kitai.batch.parse_embedding_results` instead.
+
     Args:
         client (OpenAI): Initialized OpenAI client.
         job_ids (List[str]): List of batch job IDs.
@@ -155,6 +160,12 @@ def retrieve_embeddings_batches(client: OpenAI, job_ids: List[str]) -> List[Tupl
     Returns:
         List[Tuple[str, List[float]]]: A list of tuples (custom_id, embedding).
     """
+    warnings.warn(
+        "retrieve_embeddings_batches() is deprecated and will be removed in a future release. "
+        "Use kitai.batch.download_batch_results() + kitai.batch.parse_embedding_results() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     output_files_ids = []
     failed_jobs = []
     for job_id in job_ids:
@@ -205,6 +216,10 @@ def create_batch_files_embeddings(
     """
     Split docs into batches and write JSONL files for embeddings requests.
 
+    .. deprecated::
+        Use :func:`kitai.batch.build_embedding_tasks` to build tasks in-memory,
+        then :func:`kitai.batch.submit_batch_job` to upload and submit them.
+
     Args:
         docs (List): List of document-like objects with `metadata['id']` and `page_content`.
         batch_size (int): Number of docs per batch file.
@@ -215,6 +230,12 @@ def create_batch_files_embeddings(
         ValueError: If docs is empty or batch_size <= 0.
         OSError: If file operations fail.
     """
+    warnings.warn(
+        "create_batch_files_embeddings() is deprecated and will be removed in a future release. "
+        "Use kitai.batch.build_embedding_tasks() + kitai.batch.submit_batch_job() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     if not docs:
         raise ValueError("Docs list cannot be empty.")
     if batch_size <= 0:
@@ -512,6 +533,10 @@ def create_embeddings_batches(client: OpenAI, batch_folder: str, completion_wind
     """
     Creates batch files and submits batch jobs for embeddings.
 
+    .. deprecated::
+        Use :func:`kitai.batch.submit_batch_job` with tasks from
+        :func:`kitai.batch.build_embedding_tasks` instead.
+
     Args:
         client (OpenAI): Initialized OpenAI client.
         batch_folder (str): Path to the folder containing input files.
@@ -520,6 +545,12 @@ def create_embeddings_batches(client: OpenAI, batch_folder: str, completion_wind
     Returns:
         List[dict]: A list of job creation responses.
     """
+    warnings.warn(
+        "create_embeddings_batches() is deprecated and will be removed in a future release. "
+        "Use kitai.batch.submit_batch_job() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     if not os.path.isdir(batch_folder):
         raise ValueError(f"Invalid folder path: {batch_folder}")
 
