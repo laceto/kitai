@@ -10,7 +10,7 @@ workflows.
 kitai/
   query_translation.py  — decompose / step-back / expand queries via LLM
   transform.py          — convert strings, DataFrames, and metadata into Documents
-  index.py              — FAISS vector store, BM25 retriever, embedding CSV helpers
+  index.py              — FAISS vector store, BM25 retriever, synchronous embedding, embedding CSV helpers
   retriever.py          — retriever strategy helpers (vector, BM25, hybrid, self-query, reorder)
   batch.py              — OpenAI Batch API primitives + embedding workflow helpers
   export.py             — write DataFrames to CSV / Excel
@@ -135,12 +135,18 @@ Build a FAISS or Chroma vector store from documents, or a BM25 retriever.
 ```python
 import numpy as np
 from kitai.index import (
+    embed_documents,
     create_faiss_vectorstore_from_embeddings,
     load_embeddings_from_csv,
     create_BM25retriever_from_docs,
 )
 
-# Load pre-computed embeddings from CSV
+# Synchronous embedding — any LangChain Embeddings instance, returns float32 ndarray
+# Use for small corpora; for large corpora prefer kitai.batch (50 % cheaper, async)
+from langchain_openai import OpenAIEmbeddings
+embeddings: np.ndarray = embed_documents(docs, OpenAIEmbeddings(model="text-embedding-3-small"))
+
+# Or load pre-computed embeddings from CSV (produced by a previous batch run)
 embeddings: np.ndarray = load_embeddings_from_csv(
     path_to_csv="embeddings.csv",
     embedding_column="embedding",
