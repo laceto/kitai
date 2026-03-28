@@ -1,18 +1,13 @@
 from langchain_core.documents import Document
-from langchain_community.retrievers import BM25Retriever
 import logging
 from pathlib import Path
-import os
-import warnings
-from openai import OpenAI
-import json
-from typing import List, Tuple
 import ast
 import numpy as np
 import pandas as pd
 
+from langchain_chroma import Chroma
 from langchain_community.docstore.in_memory import InMemoryDocstore
-from langchain_community.vectorstores import FAISS, Chroma
+from langchain_community.vectorstores import FAISS
 import faiss
 
 logger = logging.getLogger(__name__)
@@ -140,140 +135,6 @@ def load_embeddings_from_csv(
     # Stack embeddings
     embeddings = df_embeddings['embedding_array']
     return np.stack(embeddings)
-
-
-
-
-
-def retrieve_embeddings_batches(client: OpenAI, job_ids: List[str]) -> List[Tuple[str, List[float]]]:
-    """
-    Retrieves embeddings from completed batch jobs.
-
-    .. deprecated::
-        Use :func:`kitai.batch.download_batch_results` and
-        :func:`kitai.batch.parse_embedding_results` instead.
-
-    Args:
-        client (OpenAI): Initialized OpenAI client.
-        job_ids (List[str]): List of batch job IDs.
-
-    Returns:
-        List[Tuple[str, List[float]]]: A list of tuples (custom_id, embedding).
-    """
-    warnings.warn(
-        "retrieve_embeddings_batches() is deprecated and will be removed in a future release. "
-        "Use kitai.batch.download_batch_results() + kitai.batch.parse_embedding_results() instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    output_files_ids = []
-    failed_jobs = []
-    for job_id in job_ids:
-        try:
-            batch_info = client.batches.retrieve(job_id)
-            output_files_ids.append(batch_info.output_file_id)
-        except Exception as e:
-            logger.error("Error retrieving batch job %s: %s", job_id, e)
-            failed_jobs.append(job_id)
-
-    output_files = []
-    failed_files = []
-    for output_file_id in output_files_ids:
-        try:
-            file_content = client.files.content(output_file_id).text
-            output_files.append(file_content)
-            lines = file_content.split('\n')
-            logger.debug("File %s contains %d lines.", output_file_id, len(lines))
-        except Exception as e:
-            logger.error("Error retrieving file content for %s: %s", output_file_id, e)
-            failed_files.append(output_file_id)
-
-    embedding_results = []
-    for file_content in output_files:
-        for line in file_content.split('\n')[:-1]:  # Skip last empty line
-            try:
-                data = json.loads(line)
-                custom_id = data.get('custom_id')
-                embedding = data['response']['body']['data'][0]['embedding']
-                embedding_results.append((custom_id, embedding))
-            except Exception as e:
-                logger.error("Error parsing line: %s", e)
-
-    logger.info(
-        "Retrieved %d embeddings. Failed jobs: %d, failed files: %d",
-        len(embedding_results),
-        len(failed_jobs),
-        len(failed_files),
-    )
-    return embedding_results
-
-def create_batch_files_embeddings(
-    docs: List,
-    batch_size: int = 20_000,
-    batch_file_name: str = "icd_codes_batch",
-    output_dir: str = "./batch_files"
-) -> None:
-    """
-    Split docs into batches and write JSONL files for embeddings requests.
-
-    .. deprecated::
-        Use :func:`kitai.batch.build_embedding_tasks` to build tasks in-memory,
-        then :func:`kitai.batch.submit_batch_job` to upload and submit them.
-
-    Args:
-        docs (List): List of document-like objects with `metadata['id']` and `page_content`.
-        batch_size (int): Number of docs per batch file.
-        batch_file_name (str): Base name for batch files.
-        output_dir (str): Directory to store batch files.
-
-    Raises:
-        ValueError: If docs is empty or batch_size <= 0.
-        OSError: If file operations fail.
-    """
-    warnings.warn(
-        "create_batch_files_embeddings() is deprecated and will be removed in a future release. "
-        "Use kitai.batch.build_embedding_tasks() + kitai.batch.submit_batch_job() instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    if not docs:
-        raise ValueError("Docs list cannot be empty.")
-    if batch_size <= 0:
-        raise ValueError("Batch size must be positive.")
-
-    output_path = Path(output_dir).expanduser().resolve()
-    output_path.mkdir(parents=True, exist_ok=True)
-
-    num_files = (len(docs) + batch_size - 1) // batch_size
-    logger.info("Creating %d batch files in '%s'", num_files, output_path)
-
-    for num_file in range(num_files):
-        batch_docs = docs[num_file * batch_size : (num_file + 1) * batch_size]
-        output_file = output_path / f"{batch_file_name}_part{num_file}.jsonl"
-
-        if output_file.exists():
-            logger.debug("Removing existing file: %s", output_file)
-            output_file.unlink()
-
-        try:
-            with output_file.open("w", encoding="utf-8") as file:
-                for doc in batch_docs:
-                    payload = {
-                        "custom_id": f"custom_id_{doc.metadata['id']}",
-                        "method": "POST",
-                        "url": "/v1/embeddings",
-                        "body": {
-                            "input": doc.page_content,
-                            "model": "text-embedding-3-small",
-                            "encoding_format": "float",
-                            "dimensions": 1536,
-                        },
-                    }
-                    file.write(json.dumps(payload) + "\n")
-            logger.info("Batch file created: %s", output_file)
-        except Exception as e:
-            logger.error("Failed to write batch file '%s': %s", output_file, e)
-            raise
 
 
 def create_chroma_vectorstore(
@@ -413,48 +274,70 @@ def create_chroma_vectorstore_from_embeddings(
 
 
 def save_chroma_vectorstore(
-    docs: list[Document],
-    embedding_fn,
+    vs: Chroma,
     persist_directory: str,
-    collection_name: str = "kitai",
 ) -> Chroma:
     """
-    Build a Chroma vector store and persist it to disk.
+    Persist an existing in-memory Chroma vector store to disk.
+
+    Reads all embeddings, documents, and metadata from ``vs`` via
+    ``Collection.get()``, then writes them into a new Chroma instance backed
+    by ``persist_directory``.  The embedding function and collection name are
+    derived from ``vs`` — no second call to the embedding API is made.
 
     On chromadb >= 0.4 persistence is automatic once ``persist_directory`` is
     set — no separate ``.persist()`` call is required.
 
+    Typical usage::
+
+        vs = create_chroma_vectorstore(docs, embedding_fn, collection_name="my_col")
+        persisted = save_chroma_vectorstore(vs, persist_directory="/path/to/db")
+        # later:
+        reloaded = load_chroma_vectorstore("/path/to/db", embedding_fn, collection_name="my_col")
+
     Invariants:
-        - ``docs`` must be non-empty.
         - ``persist_directory`` must be a non-empty string.
+        - ``vs._collection`` must be readable via ``Collection.get()``.
 
     Args:
-        docs (list[Document]): Documents to index.
-        embedding_fn: A LangChain ``Embeddings`` instance.
+        vs (Chroma): An existing Chroma vector store, typically created with
+            :func:`create_chroma_vectorstore` or
+            :func:`create_chroma_vectorstore_from_embeddings`.
         persist_directory (str): Local path where Chroma writes its SQLite
             database and segment files.
-        collection_name (str): Chroma collection name.  Defaults to ``"kitai"``.
 
     Returns:
-        Chroma: Populated Chroma vector store backed by ``persist_directory``.
+        Chroma: New Chroma instance backed by ``persist_directory``, with the
+            same collection name and embedding function as ``vs``.
 
     Raises:
-        ValueError: If ``docs`` is empty or ``persist_directory`` is blank.
+        ValueError: If ``persist_directory`` is blank.
     """
-    if not docs:
-        raise ValueError("docs must be a non-empty list.")
     if not persist_directory:
         raise ValueError("persist_directory must be a non-empty string.")
 
+    collection_name = vs._collection.name
+    data = vs._collection.get(include=["embeddings", "documents", "metadatas"])
+
     logger.info(
-        "Saving Chroma vector store with %d docs to '%s'", len(docs), persist_directory
+        "Persisting Chroma collection '%s' (%d docs) to '%s'",
+        collection_name,
+        len(data["ids"]),
+        persist_directory,
     )
-    return Chroma.from_documents(
-        documents=docs,
-        embedding=embedding_fn,
+
+    persisted = Chroma(
         collection_name=collection_name,
+        embedding_function=vs._embedding_function,
         persist_directory=persist_directory,
     )
+    persisted._collection.upsert(
+        ids=data["ids"],
+        embeddings=data["embeddings"],
+        documents=data["documents"],
+        metadatas=data["metadatas"],
+    )
+    return persisted
 
 
 def load_chroma_vectorstore(
@@ -499,99 +382,5 @@ def load_chroma_vectorstore(
     )
 
 
-def create_BM25retriever_from_docs(
-    docs: list[Document],
-    k: int,
-) -> BM25Retriever:
-    """
-    Create a BM25 retriever from a list of documents.
-
-    Args:
-        docs (list[Document]): Non-empty list of LangChain Document objects.
-        k (int): Number of top documents to return per query.
-
-    Returns:
-        BM25Retriever: Configured BM25 retriever.
-
-    Raises:
-        ValueError: If docs is empty or k is not a positive integer.
-    """
-    if not docs:
-        raise ValueError("docs must be a non-empty list.")
-    if k <= 0:
-        raise ValueError(f"k must be a positive integer, got {k}.")
-
-    bm25_retriever = BM25Retriever.from_documents(docs)
-    bm25_retriever.k = k
-    return bm25_retriever
-    
-
-
-
-
-def create_embeddings_batches(client: OpenAI, batch_folder: str, completion_window: str = "24h") -> List[dict]:
-    """
-    Creates batch files and submits batch jobs for embeddings.
-
-    .. deprecated::
-        Use :func:`kitai.batch.submit_batch_job` with tasks from
-        :func:`kitai.batch.build_embedding_tasks` instead.
-
-    Args:
-        client (OpenAI): Initialized OpenAI client.
-        batch_folder (str): Path to the folder containing input files.
-        completion_window (str): Time window for batch completion (default: "24h").
-
-    Returns:
-        List[dict]: A list of job creation responses.
-    """
-    warnings.warn(
-        "create_embeddings_batches() is deprecated and will be removed in a future release. "
-        "Use kitai.batch.submit_batch_job() instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    if not os.path.isdir(batch_folder):
-        raise ValueError(f"Invalid folder path: {batch_folder}")
-
-    batch_input_files = []
-    failed_uploads = []
-    job_creations = []
-
-    # Create batch files
-    for file_name in os.listdir(batch_folder):
-        file_path = os.path.join(batch_folder, file_name)
-        if os.path.isfile(file_path):
-            try:
-                with open(file_path, "rb") as f:
-                    batch_file = client.files.create(file=f, purpose="batch")
-                    batch_input_files.append(batch_file)
-            except Exception as e:
-                logger.error("Error creating batch file for %s: %s", file_name, e)
-                failed_uploads.append(file_name)
-
-    # Create batch jobs
-    batch_file_ids = [batch_file.id for batch_file in batch_input_files]
-    for i, file_id in enumerate(batch_file_ids):
-        try:
-            job = client.batches.create(
-                input_file_id=file_id,
-                endpoint="/v1/embeddings",
-                completion_window=completion_window,
-                metadata={"description": f"part_{i}_icd_embeddings"}
-            )
-            job_creations.append(job)
-            logger.debug("Batch job created: %s", job)
-        except Exception as e:
-            logger.error("Error creating batch job for file ID %s: %s", file_id, e)
-
-    logger.info(
-        "Submitted %d batch jobs. %d files failed upload.",
-        len(job_creations),
-        len(failed_uploads),
-    )
-
-    # we extract the ids for the job to check the status
-    job_ids = [job.id for job in job_creations]
-
-    return job_ids
+# Backward-compat re-export — canonical definition moved to kitai.retriever.
+from kitai.retriever import create_BM25retriever_from_docs  # noqa: F401

@@ -78,7 +78,7 @@ so callers never need to know these import paths.
   sentinels on failure.
 - `ValueError` guards fire before any network call or index build.
 - `create_BM25retriever_from_docs` is the canonical definition in
-  `kitai/index.py`; `kitai/retriever.py` re-exports it via import.
+  `kitai/retriever.py`; `kitai/index.py` re-exports it for backward compatibility.
 - No `print()` calls; module-level `logger = logging.getLogger(__name__)`
   is used throughout.
 
@@ -144,20 +144,17 @@ poll ticks from `kitai.batch`.
 | `create_faiss_vectorstore_from_embeddings(docs, embeddings, query_encoder)` | function | returns `FAISS`; `create_vectorstore` is a deprecated alias |
 | `create_chroma_vectorstore(docs, embedding_fn, collection_name)` | function | returns ephemeral `Chroma` (callable encoder); use for `SelfQueryRetriever` |
 | `create_chroma_vectorstore_from_embeddings(docs, embeddings, query_encoder, collection_name, persist_directory)` | function | returns `Chroma` from pre-computed `np.ndarray`; supports `SelfQueryRetriever` |
-| `save_chroma_vectorstore(docs, embedding_fn, persist_directory, collection_name)` | function | returns persistent `Chroma` (callable encoder); writes to disk |
+| `save_chroma_vectorstore(vs, persist_directory)` | function | persists an existing `Chroma` instance to disk; collection name and embedding function derived from `vs` |
 | `load_chroma_vectorstore(persist_directory, embedding_fn, collection_name)` | function | loads `Chroma` from disk; raises `FileNotFoundError` if path absent |
 | `get_embedding_dim(embeddings)` | function | `ndarray` → `int` |
 | `load_embeddings_from_csv(path_to_csv, embedding_column)` | function | returns `ndarray` |
-| `create_BM25retriever_from_docs(docs, k)` | function | canonical definition |
-| `create_batch_files_embeddings(docs, batch_size, batch_file_name, output_dir)` | function | writes JSONL to disk |
-| `create_embeddings_batches(client, batch_folder, completion_window)` | function | returns `list[str]` job IDs |
-| `retrieve_embeddings_batches(client, job_ids)` | function | returns `list[tuple[str, list[float]]]` |
+| `create_BM25retriever_from_docs(docs, k)` | re-export | canonical definition in `kitai.retriever` |
 
 ### kitai.retriever
 | Symbol | Type | Notes |
 |---|---|---|
 | `create_retriever(vs, search_type, search_kwargs)` | function | returns `VectorStoreRetriever` |
-| `create_BM25retriever_from_docs(docs, k)` | re-export | imported from `kitai.index` |
+| `create_BM25retriever_from_docs(docs, k)` | function | canonical definition |
 | `create_BM25retriever_from_text(docs, k)` | function | `list[str]` → `BM25Retriever` |
 | `create_hybrid_retriever(sparse_retriever, semantic_retriever, weights_sparse)` | function | returns `EnsembleRetriever` |
 | `create_self_query_retriever(model, vector_store, document_content_description, metadata_field_info, verbose)` | function | returns `SelfQueryRetriever` |
@@ -203,9 +200,9 @@ No open items — all previously listed issues have been resolved.
 | `kitai/transform.py:list_to_docs` | bare except + print() | ✓ fixed |
 | `kitai/transform.py:flatten_list_of_lists` | bare except + print() | ✓ fixed |
 | `kitai/export.py` | print() instead of logger | ✓ fixed |
-| `kitai/index.py:retrieve_embeddings_batches` | superseded by `kitai.batch` | ✓ deprecated (`DeprecationWarning`) |
-| `kitai/index.py:create_batch_files_embeddings` | superseded by `kitai.batch` | ✓ deprecated (`DeprecationWarning`) |
-| `kitai/index.py:create_embeddings_batches` | superseded by `kitai.batch` | ✓ deprecated (`DeprecationWarning`) |
+| `kitai/index.py:retrieve_embeddings_batches` | superseded by `kitai.batch` | ✓ removed |
+| `kitai/index.py:create_batch_files_embeddings` | superseded by `kitai.batch` | ✓ removed |
+| `kitai/index.py:create_embeddings_batches` | superseded by `kitai.batch` | ✓ removed |
 
 ---
 

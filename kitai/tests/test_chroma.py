@@ -4,14 +4,19 @@ Tests for Chroma vector store factory functions in kitai.index.
 
 Coverage:
   create_chroma_vectorstore                — happy path, empty-docs guard, empty-collection-name guard
-  save_chroma_vectorstore                  — happy path (writes to disk), empty-docs guard, empty-dir guard
+  save_chroma_vectorstore                  — accepts an existing Chroma vs (not docs);
+                                             writes to disk, preserves collection name and doc count,
+                                             empty-dir guard
   load_chroma_vectorstore                  — happy path (reads from disk), missing-dir guard
   create_chroma_vectorstore_from_embeddings — happy path, length mismatch, missing id, duplicate id,
                                              float32 ndarray acceptance, persist_directory round-trip
+  round-trip: create → save → load         — all documents retrievable after full cycle
 
-TDD cycle: all tests written BEFORE implementation. Run pytest to confirm Red.
+TDD cycle: tests written BEFORE implementation. Run pytest to confirm Red,
+then implement, then confirm Green.
 """
 
+import uuid
 import pytest
 from pathlib import Path
 from langchain_core.documents import Document
@@ -34,14 +39,24 @@ def _make_docs(n: int = 3) -> list[Document]:
     ]
 
 
+def _col() -> str:
+    """Return a unique collection name to prevent cross-test contamination.
+
+    chromadb's in-memory EphemeralClient is process-scoped — tests that share
+    a collection name accumulate documents across the test session.  Using a
+    fresh UUID per call guarantees isolation.
+    """
+    return f"t_{uuid.uuid4().hex[:12]}"
+
+
 # ── create_chroma_vectorstore ─────────────────────────────────────────────────
 
 
 def test_create_chroma_vectorstore_returns_chroma():
-    from langchain_community.vectorstores import Chroma
+    from langchain_chroma import Chroma
     from kitai.index import create_chroma_vectorstore
 
-    vs = create_chroma_vectorstore(_make_docs(), _fake_embedding_fn())
+    vs = create_chroma_vectorstore(_make_docs(), _fake_embedding_fn(), collection_name=_col())
     assert isinstance(vs, Chroma)
 
 
@@ -49,7 +64,7 @@ def test_create_chroma_vectorstore_similarity_search():
     from kitai.index import create_chroma_vectorstore
 
     docs = _make_docs(4)
-    vs = create_chroma_vectorstore(docs, _fake_embedding_fn())
+    vs = create_chroma_vectorstore(docs, _fake_embedding_fn(), collection_name=_col())
     results = vs.similarity_search("doc 0", k=2)
     assert len(results) == 2
 
@@ -69,53 +84,72 @@ def test_create_chroma_vectorstore_empty_collection_name_raises():
 
 
 # ── save_chroma_vectorstore ───────────────────────────────────────────────────
+#
+# save_chroma_vectorstore(vs, persist_directory) accepts an already-built
+# Chroma instance — it does NOT take docs or embedding_fn.
+# Callers build with create_chroma_vectorstore first, then persist.
 
 
 def test_save_chroma_vectorstore_writes_to_disk(tmp_path):
-    from kitai.index import save_chroma_vectorstore
+    from kitai.index import create_chroma_vectorstore, save_chroma_vectorstore
 
     persist_dir = str(tmp_path / "chroma_db")
-    save_chroma_vectorstore(_make_docs(), _fake_embedding_fn(), persist_directory=persist_dir)
+    vs = create_chroma_vectorstore(_make_docs(), _fake_embedding_fn(), collection_name=_col())
+    save_chroma_vectorstore(vs, persist_directory=persist_dir)
 
-    # Chroma creates files in the persist directory
     assert Path(persist_dir).exists()
     assert any(Path(persist_dir).iterdir())
 
 
 def test_save_chroma_vectorstore_returns_chroma(tmp_path):
-    from langchain_community.vectorstores import Chroma
-    from kitai.index import save_chroma_vectorstore
+    from langchain_chroma import Chroma
+    from kitai.index import create_chroma_vectorstore, save_chroma_vectorstore
 
     persist_dir = str(tmp_path / "chroma_db")
-    vs = save_chroma_vectorstore(_make_docs(), _fake_embedding_fn(), persist_directory=persist_dir)
-    assert isinstance(vs, Chroma)
+    vs = create_chroma_vectorstore(_make_docs(), _fake_embedding_fn(), collection_name=_col())
+    persisted = save_chroma_vectorstore(vs, persist_directory=persist_dir)
+    assert isinstance(persisted, Chroma)
 
 
-def test_save_chroma_vectorstore_empty_docs_raises(tmp_path):
-    from kitai.index import save_chroma_vectorstore
+def test_save_chroma_vectorstore_preserves_collection_name(tmp_path):
+    from kitai.index import create_chroma_vectorstore, save_chroma_vectorstore
 
-    with pytest.raises(ValueError, match="docs"):
-        save_chroma_vectorstore([], _fake_embedding_fn(), persist_directory=str(tmp_path))
+    col = _col()
+    vs = create_chroma_vectorstore(_make_docs(), _fake_embedding_fn(), collection_name=col)
+    persisted = save_chroma_vectorstore(vs, persist_directory=str(tmp_path))
+    assert persisted._collection.name == col
+
+
+def test_save_chroma_vectorstore_preserves_doc_count(tmp_path):
+    from kitai.index import create_chroma_vectorstore, save_chroma_vectorstore
+
+    docs = _make_docs(4)
+    vs = create_chroma_vectorstore(docs, _fake_embedding_fn(), collection_name=_col())
+    persisted = save_chroma_vectorstore(vs, persist_directory=str(tmp_path))
+    assert persisted._collection.count() == len(docs)
 
 
 def test_save_chroma_vectorstore_empty_dir_raises():
-    from kitai.index import save_chroma_vectorstore
+    from kitai.index import create_chroma_vectorstore, save_chroma_vectorstore
 
+    vs = create_chroma_vectorstore(_make_docs(), _fake_embedding_fn(), collection_name=_col())
     with pytest.raises(ValueError, match="persist_directory"):
-        save_chroma_vectorstore(_make_docs(), _fake_embedding_fn(), persist_directory="")
+        save_chroma_vectorstore(vs, persist_directory="")
 
 
 # ── load_chroma_vectorstore ───────────────────────────────────────────────────
 
 
 def test_load_chroma_vectorstore_round_trip(tmp_path):
-    from kitai.index import save_chroma_vectorstore, load_chroma_vectorstore
+    from kitai.index import create_chroma_vectorstore, save_chroma_vectorstore, load_chroma_vectorstore
 
     persist_dir = str(tmp_path / "chroma_db")
+    col = _col()
     docs = _make_docs(3)
-    save_chroma_vectorstore(docs, _fake_embedding_fn(), persist_directory=persist_dir)
+    vs = create_chroma_vectorstore(docs, _fake_embedding_fn(), collection_name=col)
+    save_chroma_vectorstore(vs, persist_directory=persist_dir)
 
-    loaded = load_chroma_vectorstore(persist_dir, _fake_embedding_fn())
+    loaded = load_chroma_vectorstore(persist_dir, _fake_embedding_fn(), collection_name=col)
     results = loaded.similarity_search("doc 1", k=1)
     assert len(results) == 1
 
@@ -146,12 +180,12 @@ def _make_embeddings(n: int = 3) -> np.ndarray:
 
 
 def test_from_embeddings_returns_chroma():
-    from langchain_community.vectorstores import Chroma
+    from langchain_chroma import Chroma
     from kitai.index import create_chroma_vectorstore_from_embeddings
 
     docs = _make_docs(3)
     embs = _make_embeddings(3)
-    vs = create_chroma_vectorstore_from_embeddings(docs, embs, _fake_embedding_fn())
+    vs = create_chroma_vectorstore_from_embeddings(docs, embs, _fake_embedding_fn(), collection_name=_col())
     assert isinstance(vs, Chroma)
 
 
@@ -160,7 +194,7 @@ def test_from_embeddings_similarity_search():
 
     docs = _make_docs(4)
     embs = _make_embeddings(4)
-    vs = create_chroma_vectorstore_from_embeddings(docs, embs, _fake_embedding_fn())
+    vs = create_chroma_vectorstore_from_embeddings(docs, embs, _fake_embedding_fn(), collection_name=_col())
     results = vs.similarity_search("doc 0", k=2)
     assert len(results) == 2
 
@@ -172,7 +206,7 @@ def test_from_embeddings_accepts_float32_ndarray():
     docs = _make_docs(3)
     embs = _make_embeddings(3)
     assert embs.dtype == np.float32  # confirm input is float32
-    vs = create_chroma_vectorstore_from_embeddings(docs, embs, _fake_embedding_fn())
+    vs = create_chroma_vectorstore_from_embeddings(docs, embs, _fake_embedding_fn(), collection_name=_col())
     assert vs.similarity_search("doc 0", k=1)  # no exception means cast worked
 
 

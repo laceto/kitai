@@ -19,8 +19,6 @@ from langchain_core.documents import Document
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.vectorstores.base import VectorStore, VectorStoreRetriever
 
-from kitai.index import create_BM25retriever_from_docs  # noqa: F401 — re-exported
-
 logger = logging.getLogger(__name__)
 
 
@@ -96,6 +94,33 @@ def create_retriever(
         search_kwargs=search_kwargs,
     )
     return retriever
+
+
+def create_BM25retriever_from_docs(
+    docs: list[Document],
+    k: int,
+) -> BM25Retriever:
+    """
+    Create a BM25 retriever from a list of documents.
+
+    Args:
+        docs (list[Document]): Non-empty list of LangChain Document objects.
+        k (int): Number of top documents to return per query.
+
+    Returns:
+        BM25Retriever: Configured BM25 retriever.
+
+    Raises:
+        ValueError: If docs is empty or k is not a positive integer.
+    """
+    if not docs:
+        raise ValueError("docs must be a non-empty list.")
+    if k <= 0:
+        raise ValueError(f"k must be a positive integer, got {k}.")
+
+    bm25_retriever = BM25Retriever.from_documents(docs)
+    bm25_retriever.k = k
+    return bm25_retriever
 
 
 def create_BM25retriever_from_text(
