@@ -180,8 +180,9 @@ chroma_vs = create_chroma_vectorstore_from_embeddings(
     docs, embeddings, query_encoder=embedding_fn
 )
 
-# Persist to disk (auto-persisted on chromadb ≥ 0.4)
-chroma_vs = save_chroma_vectorstore(docs, embedding_fn, persist_directory="./chroma_db")
+# Persist an existing in-memory store to SQLite on disk
+vs = create_chroma_vectorstore(docs, embedding_fn)
+chroma_vs = save_chroma_vectorstore(vs, persist_directory="./chroma_db")
 
 # Reload from a previously saved directory
 chroma_vs = load_chroma_vectorstore("./chroma_db", embedding_fn)
