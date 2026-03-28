@@ -146,6 +146,7 @@ poll ticks from `kitai.batch`.
 | `create_chroma_vectorstore_from_embeddings(docs, embeddings, query_encoder, collection_name, persist_directory)` | function | returns `Chroma` from pre-computed `np.ndarray`; supports `SelfQueryRetriever` |
 | `save_chroma_vectorstore(vs, persist_directory)` | function | persists an existing `Chroma` instance to disk; collection name and embedding function derived from `vs` |
 | `load_chroma_vectorstore(persist_directory, embedding_fn, collection_name)` | function | loads `Chroma` from disk; raises `FileNotFoundError` if path absent |
+| `embed_documents(docs, embedding_fn)` | function | synchronous embedding — returns `float32 ndarray` of shape `(n_docs, dim)`; raises `ValueError` if `docs` is empty |
 | `get_embedding_dim(embeddings)` | function | `ndarray` → `int` |
 | `load_embeddings_from_csv(path_to_csv, embedding_column)` | function | returns `ndarray` |
 | `create_BM25retriever_from_docs(docs, k)` | re-export | canonical definition in `kitai.retriever` |

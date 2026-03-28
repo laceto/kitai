@@ -1,4 +1,5 @@
 from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
 import logging
 from pathlib import Path
 import ast
@@ -135,6 +136,43 @@ def load_embeddings_from_csv(
     # Stack embeddings
     embeddings = df_embeddings['embedding_array']
     return np.stack(embeddings)
+
+
+def embed_documents(
+    docs: list[Document],
+    embedding_fn: Embeddings,
+) -> np.ndarray:
+    """
+    Encode documents synchronously and return a float32 ndarray.
+
+    This is the synchronous counterpart to the batch-API workflow in
+    ``kitai.batch``.  Use it for small corpora where results are needed
+    immediately; for large corpora prefer ``build_embedding_tasks`` +
+    ``submit_batch_job`` (50 % cheaper, async).
+
+    The returned array feeds directly into the vectorstore constructors::
+
+        embeddings = embed_documents(docs, embedding_fn)
+        vs = create_faiss_vectorstore_from_embeddings(docs, embeddings, embedding_fn)
+        vs = create_chroma_vectorstore_from_embeddings(docs, embeddings, embedding_fn)
+
+    Args:
+        docs: Documents whose ``page_content`` will be embedded.
+        embedding_fn: Any LangChain ``Embeddings`` instance
+            (e.g. ``OpenAIEmbeddings``, ``FakeEmbeddings``).
+            The caller is responsible for initialising the model.
+
+    Returns:
+        ``np.ndarray`` of shape ``(len(docs), embedding_dim)``, dtype ``float32``.
+
+    Raises:
+        ValueError: If ``docs`` is empty.
+    """
+    if not docs:
+        raise ValueError("docs must be a non-empty list.")
+    texts = [doc.page_content for doc in docs]
+    vectors = embedding_fn.embed_documents(texts)
+    return np.array(vectors, dtype=np.float32)
 
 
 def create_chroma_vectorstore(
