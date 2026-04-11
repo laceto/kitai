@@ -54,6 +54,7 @@ LangChain types or calls the LangChain chain machinery) and/or **OpenAI**
 | `create_chroma_vectorstore_from_embeddings` | ✓ | | Returns `Chroma` from pre-computed `ndarray` |
 | `save_chroma_vectorstore` | ✓ | | Accepts and returns `Chroma` instance |
 | `load_chroma_vectorstore` | ✓ | | Returns `Chroma` |
+| `embed_documents(docs, embedding_fn)` | ✓ | | Accepts `list[Document]` + LangChain `Embeddings`; returns `float32 ndarray` |
 | `get_embedding_dim` | | | Pure numpy |
 | `load_embeddings_from_csv` | | | pandas / numpy only |
 
