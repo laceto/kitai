@@ -28,3 +28,11 @@ htmlcov/
 Thumbs.db
 
 generate_structure.py
+
+# Local dev scratch files
+api_dependencies.md
+self_retriever.md
+
+# Claude Code local settings and skills (machine-specific)
+.claude/settings.local.json
+.claude/skills/
