@@ -12,7 +12,9 @@ Public API:
 
 import logging
 
-from kitai._langchain_compat import AttributeInfo, EnsembleRetriever, SelfQueryRetriever
+from langchain_classic.chains.query_constructor.schema import AttributeInfo
+from langchain_classic.retrievers.ensemble import EnsembleRetriever
+from langchain_classic.retrievers.self_query.base import SelfQueryRetriever
 from langchain_community.document_transformers import LongContextReorder
 from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document

@@ -264,7 +264,7 @@ malformed field definitions.
 
 **Recommendation:**
 ```python
-from langchain.chains.query_constructor.schema import AttributeInfo
+from langchain_classic.chains.query_constructor.schema import AttributeInfo
 
 def create_self_query_retriever(
     ...

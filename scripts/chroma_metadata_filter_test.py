@@ -62,7 +62,7 @@ from langchain_core.embeddings import Embeddings
 from langchain_openai import ChatOpenAI
 from openai import OpenAI as _OpenAIClient
 
-from kitai._langchain_compat import AttributeInfo
+from langchain_classic.chains.query_constructor.schema import AttributeInfo
 from kitai.index import (
     create_chroma_vectorstore,       # build ephemeral (in-memory) store
     load_chroma_vectorstore,         # reload a persisted store from disk

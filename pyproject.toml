@@ -1,6 +1,6 @@
 [project]
 name = "kitai"
-version = "0.1.0"
+version = "0.2.0"
 description = "RAG toolkit: vector index, BM25, hybrid retrieval, query translation, and OpenAI Batch API helpers."
 authors = [{ name = "Luigi", email = "luigi@example.com" }]
 readme = "README.md"
@@ -14,10 +14,9 @@ dependencies = [
     "langchain-core>=0.1",
     "langchain-community>=0.0.20",
     # Classic LangChain (retrievers, self-query, ensemble).
-    # In this repo's dev venv this is installed as 'langchain_classic' to avoid
-    # collision with the Anthropic Agent SDK.  kitai/_langchain_compat.py
-    # tries 'langchain_classic' first then falls back to 'langchain' automatically.
-    "langchain>=0.1,<1.0",
+    # Published on PyPI as 'langchain-classic'. kitai.retriever imports
+    # directly from this package — no fallback to the Anthropic SDK.
+    "langchain-classic>=1.0",
     "faiss-cpu>=1.7",
 ]
 
